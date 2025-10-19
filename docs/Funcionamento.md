@@ -1,9 +1,9 @@
-````markdown
 # Sistema de Monitoramento via LoRa — Protótipo Lógico (Entrega 1)
 
 ## Visão geral
-Este protótipo demonstra o fluxo completo de dados usando apenas a biblioteca padrão do Python:  
-**simulador → servidor HTTP → banco SQLite → dashboard HTML**.  
+
+Este protótipo demonstra o fluxo completo de dados usando apenas a biblioteca padrão do Python:
+**simulador → servidor HTTP → banco SQLite → dashboard HTML**.
 Não há LoRa real nesta etapa; os dados são gerados artificialmente (pelo `simulador.py`).
 
 ---
@@ -11,41 +11,49 @@ Não há LoRa real nesta etapa; os dados são gerados artificialmente (pelo `sim
 ## Componentes (`src/`)
 
 ### 1) `servidor/servidor.py`
-- Sobe um **HTTP server** (`ThreadingHTTPServer`) na porta **8080**.  
-- **Endpoints:**
-  - `POST /ingest` : recebe leituras em JSON e coloca em uma fila (`queue`).
-  - `GET /dashboard` : retorna uma página HTML com últimas leituras e métricas.
-  - `GET /api/last` : retorna, em JSON, a última leitura por sala (debug).
-  - `GET /health` : status simples do servidor.
-- **Worker de persistência:**
-  - Uma thread separada lê a fila e grava no banco via `storage.py`.
-  - Resposta a `/ingest` é **202 Accepted** (processamento assíncrono).
-- **Logging básico** configurado com níveis padrão.
+
+* Sobe um **HTTP server** (`ThreadingHTTPServer`) na porta **8080**.
+* **Endpoints:**
+
+  * `POST /ingest` : recebe leituras em JSON e coloca em uma fila (`queue`).
+  * `GET /dashboard` : retorna uma página HTML com últimas leituras e métricas.
+  * `GET /api/last` : retorna, em JSON, a última leitura por sala (debug).
+  * `GET /health` : status simples do servidor.
+* **Worker de persistência:**
+
+  * Uma thread separada lê a fila e grava no banco via `storage.py`.
+  * Resposta a `/ingest` é **202 Accepted** (processamento assíncrono).
+* **Logging básico** configurado com níveis padrão.
 
 ---
 
 ### 2) `servidor/storage.py`
-- Abstrai a persistência com **SQLite** (`database/dados.db`).
-- Cria a tabela `readings` (`ts`, `node_id`, `room_id`, `temp`, `rh`, `pm25`, `mode`).
-- **Funções principais:**
-  - `init_db()` — garante o esquema e índices.
-  - `insert_reading(...)` — insere/atualiza uma leitura.
-  - `get_last_readings(...)` — últimas N leituras (geral ou por sala).
-  - `get_latest_by_room()` — última leitura por sala (para os cards).
-  - `count_rows()` — total de linhas (métricas).
+
+* Abstrai a persistência com **SQLite** (`database/dados.db`).
+* Cria a tabela `readings` (`ts`, `node_id`, `room_id`, `temp`, `rh`, `pm25`, `mode`).
+* **Funções principais:**
+
+  * `init_db()` — garante o esquema e índices.
+  * `insert_reading(...)` — insere/atualiza uma leitura.
+  * `get_last_readings(...)` — últimas N leituras (geral ou por sala).
+  * `get_latest_by_room()` — última leitura por sala (para os cards).
+  * `count_rows()` — total de linhas (métricas).
 
 ---
 
 ### 3) `servidor/dashboard.py`
-- Gera o **HTML simples do dashboard** (sem frameworks).
-- Exibe “cards” com a última leitura por sala e uma tabela de leituras recentes.
-- A página usa **meta refresh** (autoatualização a cada 5 s).
+
+* Gera o **HTML simples do dashboard** (sem frameworks).
+* Exibe “cards” com a última leitura por sala e uma tabela de leituras recentes.
+* A página usa **meta refresh** (autoatualização a cada 5 s).
 
 ---
 
 ### 4) `simulador/simulador.py`
-- Versão simplificada: gera periodicamente **leituras falsas** e envia via `HTTP POST /ingest`.
-- **Campos enviados (JSON):**
+
+* Versão simplificada: gera periodicamente **leituras falsas** e envia via `HTTP POST /ingest`.
+* **Campos enviados (JSON):**
+
   ```json
   {
     "ts":   <epoch em segundos>,
@@ -56,7 +64,7 @@ Não há LoRa real nesta etapa; os dados são gerados artificialmente (pelo `sim
     "pm25": <poeira µg/m³>,
     "mode": "fixed"
   }
-````
+  ```
 
 ---
 
@@ -113,5 +121,3 @@ docs/          → diagramas, prints e relatório
   ```
   http.server, sqlite3, threading, queue, logging
   ```
-
-```

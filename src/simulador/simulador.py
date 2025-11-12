@@ -1,12 +1,5 @@
-#!/usr/bin/env python3
-"""
-Simulador simples de um nó sensor LoRa (Entrega 1 - Protótipo Lógico)
-Gera dados falsos e envia periodicamente via HTTP POST /ingest.
-
-Uso:
-    python3 simulador.py
-"""
-
+import serial
+import time
 import json
 import time
 import random
@@ -16,17 +9,41 @@ SERVER_URL = "http://localhost:8080/ingest"  # URL do servidor
 NODE_ID = "N01"
 ROOM_ID = "RACK_A"
 INTERVAL = 5  # segundos entre envios
+PORTA = '/dev/ttyACM0'
+BAUD_RATE = 115200
 
-def gerar_leitura():
+def main():
+    print("=== Leitor Serial Python ===")
+    ser = serial.Serial(PORTA, BAUD_RATE, timeout=1)
+    time.sleep(2)  # Aguarda 2 segundos para estabilizar
+    print(f"✓ Conectado com sucesso em {PORTA}")
+    print(f"✓ Aguardando dados do ESP32S3...\n")
+    print("="*50)
+    # Loop infinito para ler os dados
+    while True:
+        if ser.in_waiting > 0:  # Se há dados disponíveis
+            # Lê uma linha da serial
+            linha = ser.readline().decode('utf-8').strip()
+            if linha:  # Se a linha não está vazia
+                dados = paserver(linha)
+                print(f"Temperatura: {dados[0]} °C, Umidade: {dados[1]} %")
+                dados_dashboard = gerar_leitura(dados[0], dados[1])
+                print(dados_dashboard)
+                enviar_dado(dados_dashboard)
+                time.sleep(INTERVAL)
+
+def paserver(linha):
+    temperatura , umidade = list(map(float,linha.split(","))) # temperatura, umidade
+    return [temperatura, umidade]
+
+def gerar_leitura(temperatura, umidade):
     """Gera uma leitura aleatória simples."""
     return {
         "ts": int(time.time()),
-        "node_id": NODE_ID,
-        "room_id": ROOM_ID,
-        "t": round(random.uniform(22.0, 28.0), 1),   # temperatura °C
-        "rh": round(random.uniform(40.0, 70.0), 1),  # umidade %
-        "pm25": round(random.uniform(10.0, 50.0), 1),# poeira µg/m³
-        "mode": "fixed"
+        "t": temperatura,   # temperatura °C
+        "rh": umidade,  # umidade %
+        "mode": "fixed",
+        "node_id": 17
     }
 
 def enviar_dado(dado):
@@ -38,19 +55,6 @@ def enviar_dado(dado):
             print(f"[{time.strftime('%H:%M:%S')}] Enviado -> {resp.status} {resp.reason}")
     except Exception as e:
         print(f"[ERRO] Falha ao enviar: {e}")
-
-def main():
-    print("=== Simulador de Nó LoRa (protótipo lógico) ===")
-    print(f"Enviando dados para: {SERVER_URL}")
-    print("Pressione Ctrl+C para parar.\n")
-
-    try:
-        while True:
-            dado = gerar_leitura()
-            enviar_dado(dado)
-            time.sleep(INTERVAL)
-    except KeyboardInterrupt:
-        print("\nSimulador encerrado.")
 
 if __name__ == "__main__":
     main()

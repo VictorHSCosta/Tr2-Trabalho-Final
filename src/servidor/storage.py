@@ -70,14 +70,21 @@ def insert_reading(
                 (ts, node_id, room_id, temp, rh, pm25, mode),
             )
 
-
+def delete_all():
+    """Apaga todas as leituras (para testes)."""
+    conn = _get_conn()
+    with _lock:
+        with conn:
+            conn.execute("DELETE FROM readings")
+            conn.commit()
+            
 def get_last_readings(limit: int = 50, room_id: Optional[str] = None) -> List[Dict[str, Any]]:
     conn = _get_conn()
     cur = conn.cursor()
     if room_id:
         cur.execute(
             """
-            SELECT ts, node_id, room_id, temp, rh, pm25, mode
+            SELECT ts, room_id, temp, rh
             FROM readings
             WHERE room_id = ?
             ORDER BY ts DESC
@@ -88,7 +95,7 @@ def get_last_readings(limit: int = 50, room_id: Optional[str] = None) -> List[Di
     else:
         cur.execute(
             """
-            SELECT ts, node_id, room_id, temp, rh, pm25, mode
+            SELECT ts, room_id, temp, rh
             FROM readings
             ORDER BY ts DESC
             LIMIT ?

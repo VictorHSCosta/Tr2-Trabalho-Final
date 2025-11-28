@@ -6,7 +6,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   int state = radio.begin();
-  
+
   if (state == RADIOLIB_ERR_NONE) {
     //Serial.println("Envio recebido.\n");
   } else {
@@ -24,17 +24,17 @@ void setup() {
 void loop() {
   String mensagem;
   int state = radio.readData(mensagem);
-  
+
   if (state == RADIOLIB_ERR_NONE) {
     //Serial.print("Recebido: ");
     Serial.println(mensagem);
     //Serial.println("---------------------------");
-  } 
+  }
   else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-  } 
+  }
   else {
     Serial.print("Erro de recepção: ");
     Serial.println(state);
   }
-  delay(100);
+  delay(5000);
 }

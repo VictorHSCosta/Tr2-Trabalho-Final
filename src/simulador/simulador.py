@@ -10,27 +10,36 @@ PORTA = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
 def main():
+    pacote_anterior = None
     print("=== Leitor Serial Python ===")
-    ser = serial.Serial(PORTA, BAUD_RATE, timeout=1)
-    time.sleep(2)  # Aguarda 2 segundos para estabilizar
+    ser = serial.Serial(PORTA, BAUD_RATE, timeout = 1)
+    time.sleep(2)
     print(f"Conectado com sucesso em {PORTA}")
     print(f"Aguardando dados do ESP32S3...\n")
     print("="*50)
-    # Loop infinito para ler os dados
+
     while True:
         if ser.in_waiting > 0:  # Se há dados disponíveis
             # Lê uma linha da serial
             linha = ser.readline().decode('utf-8').strip()
-            if linha:  # Se a linha não está vazia
+            # Se a linha for inválida
+            if not linha:
+                continue
+            # Se a linha não está vazia
+            if linha:
                 dados_serial = paserver(linha)
-                # print(f"Temperatura: {dados_serial[0]} °C, Umidade: {dados_serial[1]} %")
-                dados_dashboard = gerar_leitura(dados_serial[0], dados_serial[1])
-                enviar_dado(dados_dashboard)
-                time.sleep(INTERVAL)
+                # Verifico o número do pacote recebido pela porta serial
+                numero_do_pacote_atual = dados_serial[0]
+                # Caso o pacote seja duplicado
+                if numero_do_pacote_atual == pacote_anterior:
+                    continue
+                # Caso seja um pacote novo
+                pacote_anterior = numero_do_pacote_atual
+                print(f"Número do pacote: {dados_serial[0]}, Temperatura: {dados_serial[1]}°C, Umidade {dados_serial[2]} %")
 
-def paserver(linha: str) -> list[float]:
-    temperatura, umidade = list(map(float, linha.split(",")))  # temperatura, umidade
-    return [temperatura, umidade]
+def paserver(linha: str) -> list:
+    numero_do_pacote, temperatura, umidade = linha.split(",")
+    return [int(numero_do_pacote), float(temperatura), float(umidade)]
 
 def gerar_leitura(temperatura: float, umidade: float) -> dict:
     """Gera uma leitura aleatória simples."""

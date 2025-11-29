@@ -154,6 +154,21 @@ def get_latest_by_packet() -> Dict[str, Dict[str, Any]]:
     rows = cur.fetchall()
     return {row["packet_number"]: dict(row) for row in rows}
 
+def get_last_readings_for_packet(packet_number: str, limit: int = 20):
+    conn = _get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT ts, temp, rh
+        FROM readings
+        WHERE packet_number = ?
+        ORDER BY ts DESC
+        LIMIT ?
+        """,
+        (packet_number, limit),
+    )
+    rows = cur.fetchall()
+    return [dict(r) for r in rows][::-1]  # inverte para ordem cronológica
 
 def count_rows() -> int:
     conn = _get_conn()

@@ -75,19 +75,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path in ("/", "/dashboard"):
-            qs = parse_qs(parsed.query)
-            packet_number = qs.get("packet_number", [None])[0]
 
             # Dados para o dashboard
             last_by_packet = storage.get_latest_by_packet()
-            recent = storage.get_last_readings(limit=50, packet_number=packet_number)
+            recent = storage.get_last_readings(limit=50)
 
             stats = {
                 "queued": INGEST_QUEUE.qsize(),
                 "packets": len(last_by_packet),
                 "total_rows": storage.count_rows(),
                 "updated_at": time.time(),
-                "filtered_packet": packet_number,
             }
             html = dashboard.render_html(last_packet=last_by_packet, recent=recent, stats=stats)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")

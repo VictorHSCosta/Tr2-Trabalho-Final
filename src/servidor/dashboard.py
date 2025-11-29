@@ -1,11 +1,11 @@
 """
 Gera HTML simples para o dashboard.
-- render_html(last_by_room, recent, stats) -> str
+- render_html(last_packet, recent, stats) -> str
 """
 
 import time
 from html import escape
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 
 def _fmt_ts(ts: int) -> str:
@@ -15,12 +15,129 @@ def _fmt_ts(ts: int) -> str:
         return str(ts)
 
 
+def _build_timeseries_svg(
+    recent: List[Dict[str, Any]],
+    value_key: str,
+) -> str:
+    """
+    Gera um SVG simples de série temporal usando os dados de `recent`.
+    value_key: "temp" ou "rh"
+    """
+    # Filtra apenas linhas com valor válido
+    points: List[Tuple[int, float]] = []
+    for r in recent:
+        v = r.get(value_key)
+        ts = r.get("ts")
+        if v is None or ts is None:
+            continue
+        try:
+            v = float(v)
+            ts = int(ts)
+        except Exception:
+            continue
+        points.append((ts, v))
+
+    if len(points) < 2:
+        return "<div class='chart-empty'><em>Sem dados suficientes para o gráfico.</em></div>"
+
+    # Ordena por timestamp (garantia)
+    points.sort(key=lambda x: x[0])
+
+    ts_list = [p[0] for p in points]
+    ys = [p[1] for p in points]
+
+    y_min = min(ys)
+    y_max = max(ys)
+    if y_max == y_min:
+        # Evita divisão por zero e dá um "respiro" visual
+        y_max = y_min + 1.0
+
+    # Margens internas no SVG (em "unidades" do viewBox)
+    LEFT = 18
+    RIGHT = 6
+    TOP = 8
+    BOTTOM = 26
+    WIDTH = 140
+    HEIGHT = 120
+
+    usable_w = WIDTH - LEFT - RIGHT
+    usable_h = HEIGHT - TOP - BOTTOM
+
+    n = len(points)
+    xs = []
+    for i in range(n):
+        if n == 1:
+            x = LEFT + usable_w / 2
+        else:
+            x = LEFT + (usable_w * i / (n - 1))
+        xs.append(x)
+
+    svg_points = []
+    for x, y in zip(xs, ys):
+        norm = (y - y_min) / (y_max - y_min)
+        svg_y = TOP + (1 - norm) * usable_h
+        svg_points.append(f"{x:.2f},{svg_y:.2f}")
+
+    # Ticks em X (tempo) – no máx. 5 labels
+    max_labels = 5
+    step = max(1, n // max_labels)
+    tick_indices = sorted(set(list(range(0, n, step)) + [n - 1]))
+
+    x_ticks = []
+    axis_y = TOP + usable_h            # posição da linha do eixo X
+    label_y = axis_y + 10              # labels um pouco abaixo da linha
+
+    for idx in tick_indices:
+        x = xs[idx]
+        ts_val = ts_list[idx]
+        label = time.strftime("%H:%M", time.localtime(ts_val))
+        x_ticks.append(
+            f'<text x="{x:.2f}" y="{label_y:.2f}" '
+            f'text-anchor="middle" class="axis-label-x">{escape(label)}</text>'
+        )
+
+    # Ticks em Y (min, meio, max)
+    y_ticks = []
+    for frac, val in [(0.0, y_min), (0.5, (y_min + y_max) / 2), (1.0, y_max)]:
+        y = TOP + (1 - frac) * usable_h
+        y_ticks.append(
+            f'<text x="{LEFT - 2}" dx="-4" y="{y:.2f}" '
+            f'text-anchor="end" alignment-baseline="middle" '
+            f'class="axis-label-y">{val:.1f}</text>'
+        )
+
+
+    svg = f"""
+    <svg viewBox="0 0 {WIDTH} {HEIGHT}" class="chart-svg">
+      <line x1="{LEFT}" y1="{TOP + usable_h}" x2="{WIDTH - RIGHT}" y2="{TOP + usable_h}" class="axis-line" />
+      <line x1="{LEFT}" y1="{TOP}" x2="{LEFT}" y2="{TOP + usable_h}" class="axis-line" />
+
+      <polyline
+         fill="rgba(43,108,176,0.12)"
+         stroke="none"
+         points="{LEFT},{TOP + usable_h} {' '.join(svg_points)} {WIDTH - RIGHT},{TOP + usable_h}"
+      />
+
+      <polyline
+         fill="none"
+         stroke="#2b6cb0"
+         stroke-width="2.4"
+         points="{' '.join(svg_points)}"
+      />
+
+      {''.join(x_ticks)}
+      {''.join(y_ticks)}
+    </svg>
+    """
+    return svg
+
+
 def render_html(
     last_packet: Dict[str, Dict[str, Any]],
     recent: List[Dict[str, Any]],
     stats: Dict[str, Any],
 ) -> str:
-    # Cards de última leitura por sala
+    # Cards de última leitura por packet
     cards = []
     if not last_packet:
         cards.append("<div class='card empty'><em>Sem dados ainda.</em></div>")
@@ -49,7 +166,7 @@ def render_html(
             """
             cards.append(card)
 
-    # Tabela de últimas leituras (recortes)
+    # Tabela de últimas leituras
     rows_html = []
     for r in recent:
         rows_html.append(
@@ -61,21 +178,18 @@ def render_html(
             "</tr>"
         )
 
-    # Compatível com stats['filtered_packet'] ou stats['filtered_room']
-    filtered_value = stats.get("filtered_packet") or stats.get("filtered_room")
-    filtered = (
-        f" (filtro: packet_number={escape(str(filtered_value))})"
-        if filtered_value
-        else ""
-    )
     updated = _fmt_ts(int(stats.get("updated_at", time.time())))
+
+    # Gráficos de série temporal usando as leituras recentes
+    temp_svg = _build_timeseries_svg(recent, "temp")
+    rh_svg = _build_timeseries_svg(recent, "rh")
 
     html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <title>Dashboard LoRa - Protótipo</title>
-  <meta http-equiv="refresh" content="5"> <!-- auto-refresh a cada 5s -->
+  <meta http-equiv="refresh" content="10"> <!-- auto-refresh a cada 10s -->
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     :root {{
@@ -95,7 +209,7 @@ def render_html(
     header {{ display:flex; flex-wrap:wrap; align-items:baseline; gap:12px; justify-content:space-between; }}
     header h1 {{ margin:0; font-size:20px; letter-spacing: -0.2px; }}
     .sub {{ color:var(--muted); font-size:13px; }}
-    .topline {{ display:flex; gap:8px; align-items:center; }}
+    .topline {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }}
     .pill {{ display:inline-block; background: #eef6ff; border:1px solid var(--border); padding:6px 10px; border-radius:999px; font-size:13px; color:var(--accent); }}
     .metrics {{ margin: 8px 0 18px; color:var(--muted); font-size:13px; }}
 
@@ -111,7 +225,48 @@ def render_html(
     .label {{ font-size:12px; color:var(--muted); }}
     .value {{ font-weight:600; margin-top:6px; font-size:15px; }}
 
-    table {{ border-collapse: collapse; width: 100%; margin-top: 12px; background: #fff; border-radius:8px; overflow:hidden; box-shadow: var(--shadow); }}
+    .charts-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }}
+    .chart-title {{
+      margin: 0;
+      font-size: 15px;
+    }}
+    .chart-subtitle {{
+      margin: 0;
+      font-size: 12px;
+      color: var(--muted);
+    }}
+    .chart-body {{
+      margin-top: 6px;
+    }}
+    .chart-svg {{
+      width: 100%;
+      height: 260px;
+    }}
+    .axis-line {{
+      stroke: #d0d7e2;
+      stroke-width: 0.8;
+    }}
+    .axis-label-x {{
+      font-size: 6px;
+      fill: #8791a2;
+      dominant-baseline: hanging;
+    }}
+    .axis-label-y {{
+      font-size: 10px;
+      fill: #8791a2;
+    }}
+    .chart-empty {{
+      font-size: 13px;
+      color: var(--muted);
+      padding: 12px 4px;
+    }}
+
+    table {{ border-collapse: collapse; width: 100%; margin-top: 18px; background: #fff; border-radius:8px; overflow:hidden; box-shadow: var(--shadow); }}
     thead th {{ background: #f7fbff; padding:10px 12px; text-align:left; font-size:13px; color:var(--muted); border-bottom:1px solid var(--border); }}
     tbody td {{ padding:10px 12px; font-size:14px; border-bottom:1px solid #f1f5f9; }}
     tbody tr:last-child td {{ border-bottom: none; }}
@@ -169,8 +324,8 @@ def render_html(
     </div>
     <div class="topline">
       <span class="pill">Leituras: {stats.get('total_rows', 0)}</span>
-      <div class="sub">Última: <strong>{updated}</strong>{filtered}</div>
-      <form class="danger-zone" method="POST" action="/delete-all" onsubmit="return confirmDeleteAll(this);">
+      <div class="sub">Última: <strong>{updated}</strong></div>
+      <form class="danger-zone" method="POST" action="/admin/delete-all" onsubmit="return confirmDeleteAll(this);">
         <button type="submit" class="btn-danger" title="Apagar todos os dados do banco">
           <span class="icon">🗑️</span>
           <span>Apagar todos os dados</span>
@@ -182,6 +337,31 @@ def render_html(
   <h2 style="margin-top:18px;font-size:16px;">Última leitura</h2>
   <div class="grid" role="list">
     {''.join(cards)}
+  </div>
+
+  <div class="charts-grid">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3 class="chart-title">Temperatura (°C) – evolução temporal</h3>
+          <p class="chart-subtitle">Baseado nas leituras recentes</p>
+        </div>
+      </div>
+      <div class="chart-body">
+        {temp_svg}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3 class="chart-title">Umidade Relativa (%) – evolução temporal</h3>
+          <p class="chart-subtitle">Baseado nas leituras recentes</p>
+        </div>
+      </div>
+      <div class="chart-body">
+        {rh_svg}
+      </div>
+    </div>
   </div>
 
   <h2 style="margin-top:18px;font-size:16px;">Leituras recentes</h2>

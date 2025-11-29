@@ -16,23 +16,23 @@ def _fmt_ts(ts: int) -> str:
 
 
 def render_html(
-    last_by_room: Dict[str, Dict[str, Any]],
+    last_packet: Dict[str, Dict[str, Any]],
     recent: List[Dict[str, Any]],
     stats: Dict[str, Any],
 ) -> str:
     # Cards de última leitura por sala
     cards = []
-    if not last_by_room:
+    if not last_packet:
         cards.append("<div class='card empty'><em>Sem dados ainda.</em></div>")
     else:
-        for room_id, row in last_by_room.items():
+        for packet_number, row in last_packet.items():
             ts = _fmt_ts(row.get("ts"))
             temp = escape(str(row.get("temp", "—")))
             rh = escape(str(row.get("rh", "—")))
             card = f"""
             <div class="card">
               <div class="card-head">
-                <h3 class="room">Sala {escape(str(room_id))}</h3>
+                <h3 class="room">N° Pacote {escape(str(packet_number))}</h3>
                 <div class="small muted">{ts}</div>
               </div>
               <div class="card-body">
@@ -55,13 +55,19 @@ def render_html(
         rows_html.append(
             "<tr>"
             f"<td>{_fmt_ts(r.get('ts'))}</td>"
-            f"<td>{escape(str(r.get('room_id')))}</td>"
+            f"<td>{escape(str(r.get('packet_number')))}</td>"
             f"<td>{escape(str(r.get('temp')))}</td>"
             f"<td>{escape(str(r.get('rh')))}</td>"
             "</tr>"
         )
 
-    filtered = f" (filtro: room_id={escape(stats['filtered_room'])})" if stats.get("filtered_room") else ""
+    # Compatível com stats['filtered_packet'] ou stats['filtered_room']
+    filtered_value = stats.get("filtered_packet") or stats.get("filtered_room")
+    filtered = (
+        f" (filtro: packet_number={escape(str(filtered_value))})"
+        if filtered_value
+        else ""
+    )
     updated = _fmt_ts(int(stats.get("updated_at", time.time())))
 
     html = f"""<!DOCTYPE html>
@@ -80,6 +86,9 @@ def render_html(
       --border: #e6eef8;
       --shadow: 0 6px 18px rgba(32,40,55,0.06);
       --radius: 10px;
+      --danger: #e53e3e;
+      --danger-soft: #fff5f5;
+      --danger-border: #fed7d7;
     }}
     * {{ box-sizing: border-box; }}
     body {{ font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 20px; background: var(--bg); color:#0b1220; }}
@@ -108,14 +117,49 @@ def render_html(
     tbody tr:last-child td {{ border-bottom: none; }}
 
     @media (max-width:700px) {{
-      header {{ gap:8px; }}
+      header {{ gap:8px; flex-direction:column; align-items:flex-start; }}
+      .topline {{ width:100%; justify-content:space-between; }}
       .card-body {{ flex-direction:column; }}
       thead th, tbody td {{ font-size:13px; padding:8px; }}
     }}
 
     .footer {{ margin-top: 18px; color:var(--muted); font-size:12px; }}
     code {{ background: #f6f8fa; padding: 2px 6px; border-radius: 4px; font-size:13px; }}
+
+    .btn-danger {{
+      border-radius: 999px;
+      border: 1px solid var(--danger-border);
+      background: var(--danger-soft);
+      color: var(--danger);
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }}
+    .btn-danger:hover {{
+      background: #fed7d7;
+    }}
+    .btn-danger span.icon {{
+      font-size: 14px;
+      line-height: 1;
+    }}
+    .danger-zone {{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }}
   </style>
+  <script>
+    function confirmDeleteAll(form) {{
+      if (confirm("Tem certeza que deseja apagar TODAS as leituras do banco de dados?")) {{
+        return true;
+      }}
+      return false;
+    }}
+  </script>
 </head>
 <body>
   <header>
@@ -126,6 +170,12 @@ def render_html(
     <div class="topline">
       <span class="pill">Leituras: {stats.get('total_rows', 0)}</span>
       <div class="sub">Última: <strong>{updated}</strong>{filtered}</div>
+      <form class="danger-zone" method="POST" action="/delete-all" onsubmit="return confirmDeleteAll(this);">
+        <button type="submit" class="btn-danger" title="Apagar todos os dados do banco">
+          <span class="icon">🗑️</span>
+          <span>Apagar todos os dados</span>
+        </button>
+      </form>
     </div>
   </header>
 
@@ -140,7 +190,7 @@ def render_html(
       <thead>
         <tr>
           <th>Timestamp</th>
-          <th>Sala</th>
+          <th>Número do Pacote</th>
           <th>Temp (°C)</th>
           <th>UR (%)</th>
         </tr>

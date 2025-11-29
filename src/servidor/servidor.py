@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Servidor HTTP.
-- POST /ingest  : recebe leituras em JSON e enfileira para persistência
-- GET  /dashboard : renderiza HTML simples com últimas leituras
-- GET  /health : status rápido
+- POST /ingest        : recebe leituras em JSON e enfileira para persistência
+- POST /delete-all : apaga todas as leituras do banco
+- GET  /dashboard     : renderiza HTML simples com últimas leituras
+- GET  /health        : status rápido
 
 Execução:
   python3 servidor.py
@@ -46,12 +47,9 @@ def worker_persistencia():
         try:
             storage.insert_reading(
                 ts=item["ts"],
-                node_id=item["node_id"],
-                room_id=item.get("room_id", "DEFAULT"),
+                packet_number=item.get("packet_number"),
                 temp=item.get("t"),
                 rh=item.get("rh"),
-                pm25=item.get("pm25"),
-                mode=item.get("mode"),
             )
         except Exception as e:
             log.exception("Falha ao persistir leitura: %s", e)
@@ -78,20 +76,20 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path in ("/", "/dashboard"):
             qs = parse_qs(parsed.query)
-            room_id = qs.get("room_id", [None])[0]
+            packet_number = qs.get("packet_number", [None])[0]
 
             # Dados para o dashboard
-            last_by_room = storage.get_latest_by_room()
-            recent = storage.get_last_readings(limit=50, room_id=room_id)
+            last_by_packet = storage.get_latest_by_packet()
+            recent = storage.get_last_readings(limit=50, packet_number=packet_number)
 
             stats = {
                 "queued": INGEST_QUEUE.qsize(),
-                "rooms": len(last_by_room),
+                "packets": len(last_by_packet),
                 "total_rows": storage.count_rows(),
                 "updated_at": time.time(),
-                "filtered_room": room_id,
+                "filtered_packet": packet_number,
             }
-            html = dashboard.render_html(last_by_room=last_by_room, recent=recent, stats=stats)
+            html = dashboard.render_html(last_packet=last_by_packet, recent=recent, stats=stats)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
 
@@ -102,7 +100,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/last":
             # Endpoint simples para debug/validação automática
-            data = storage.get_latest_by_room()
+            data = storage.get_latest_by_packet()
             self._send(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json")
             return
 
@@ -110,41 +108,55 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/ingest":
-            self._send(404, b"Not Found")
+
+        # 1) Rota de ingestão normal
+        if parsed.path == "/ingest":
+            # Lê payload
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length)
+                data = json.loads(raw.decode("utf-8"))
+            except Exception as e:
+                log.warning("Payload inválido: %s", e)
+                self._send(400, b"Bad Request: invalid JSON")
+                return
+
+            # Validação mínima
+            required = ("packet_number",)
+            if not all(k in data for k in required):
+                self._send(422, b"Unprocessable Entity: missing packet_number")
+                return
+
+            # Enfileira para persistência
+            try:
+                INGEST_QUEUE.put_nowait(data)
+            except queue.Full:
+                log.error("Fila cheia! descartando leitura.")
+                self._send(503, b"Service Unavailable: queue full")
+                return
+
+            # 202 para indicar que foi aceito e será processado
+            self._send(202, b"Accepted")
             return
 
-        # Lê payload
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            raw = self.rfile.read(length)
-            data = json.loads(raw.decode("utf-8"))
-        except Exception as e:
-            log.warning("Payload inválido: %s", e)
-            self._send(400, b"Bad Request: invalid JSON")
+        # 2) Rota para apagar todos os dados
+        if parsed.path == "/delete-all":
+            try:
+                storage.delete_all()
+                log.warning("Todas as leituras foram apagadas via /delete-all")
+            except Exception as e:
+                log.exception("Erro ao apagar todas as leituras: %s", e)
+                self._send(500, b"Internal Server Error")
+                return
+
+            # Redireciona de volta para o dashboard
+            self.send_response(303)
+            self.send_header("Location", "/dashboard")
+            self.end_headers()
             return
 
-        # Validação mínima
-        required = ("node_id",)
-        if not all(k in data for k in required):
-            self._send(422, b"Unprocessable Entity: missing node_id")
-            return
-
-        # Campos padrão
-        data.setdefault("ts", int(time.time()))
-        data.setdefault("room_id", "DEFAULT")
-        # Bons nomes curtos (opcionais) já previstos: t (temp), rh, pm25, mode
-
-        # Enfileira para persistência
-        try:
-            INGEST_QUEUE.put_nowait(data)
-        except queue.Full:
-            log.error("Fila cheia! descartando leitura.")
-            self._send(503, b"Service Unavailable: queue full")
-            return
-
-        # 202 para indicar que foi aceito e será processado
-        self._send(202, b"Accepted")
+        # Rota não encontrada
+        self._send(404, b"Not Found")
 
     # Silencia log de cada GET no console (opcional)
     def log_message(self, fmt, *args):
@@ -153,6 +165,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     storage.init_db()  # garante esquema pronto
+    storage.migrate_db()  # aplica migrações, se necessário
     with ThreadingHTTPServer((HOST, PORT), Handler) as httpd:
         log.info("Servidor escutando em http://%s:%d", HOST, PORT)
         try:

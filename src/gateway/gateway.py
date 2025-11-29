@@ -5,7 +5,6 @@ import time
 import urllib.request
 
 SERVER_URL = "http://localhost:8080/ingest"  # URL do servidor
-INTERVAL = 5  # segundos entre envios
 PORTA = '/dev/ttyACM0'
 BAUD_RATE = 115200
 
@@ -27,28 +26,30 @@ def main():
                 continue
             # Se a linha não está vazia
             if linha:
-                dados_serial = paserver(linha)
+                numero_do_pacote_atual, temperatura_atual, umidade_atual = paserver(linha)
                 # Verifico o número do pacote recebido pela porta serial
-                numero_do_pacote_atual = dados_serial[0]
                 # Caso o pacote seja duplicado
                 if numero_do_pacote_atual == pacote_anterior:
                     continue
                 # Caso seja um pacote novo
                 pacote_anterior = numero_do_pacote_atual
-                print(f"Número do pacote: {dados_serial[0]}, Temperatura: {dados_serial[1]}°C, Umidade {dados_serial[2]} %")
+                print(f"Número do pacote: {numero_do_pacote_atual}, Temperatura: {temperatura_atual}°C, Umidade {umidade_atual} %")
+                # Preparo o dado no formato esperado pelo servidor
+                dados_dashboard = gerar_leitura(numero_do_pacote_atual, temperatura_atual, umidade_atual)
+                # Envio o dado para o servidor
+                enviar_dado(dados_dashboard)
 
 def paserver(linha: str) -> list:
     numero_do_pacote, temperatura, umidade = linha.split(",")
     return [int(numero_do_pacote), float(temperatura), float(umidade)]
 
-def gerar_leitura(temperatura: float, umidade: float) -> dict:
-    """Gera uma leitura aleatória simples."""
+def gerar_leitura(numero_pacote: int, temperatura: float, umidade: float) -> dict:
+    """Gera uma leitura para enviar ao servidor no formato JSON."""
     return {
         "ts": int(time.time()),
+        "packet_number": numero_pacote,
         "t": temperatura,   # temperatura °C
         "rh": umidade,  # umidade %
-        "mode": "fixed",
-        "node_id": 17
     }
 
 def enviar_dado(dado: dict):

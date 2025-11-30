@@ -325,7 +325,7 @@ def render_html(
     <div class="topline">
       <span class="pill">Leituras: {stats.get('total_rows', 0)}</span>
       <div class="sub">Última: <strong>{updated}</strong></div>
-      <form class="danger-zone" method="POST" action="/admin/delete-all" onsubmit="return confirmDeleteAll(this);">
+      <form class="danger-zone" method="POST" action="/delete-all" onsubmit="return confirmDeleteAll(this);">
         <button type="submit" class="btn-danger" title="Apagar todos os dados do banco">
           <span class="icon">🗑️</span>
           <span>Apagar todos os dados</span>

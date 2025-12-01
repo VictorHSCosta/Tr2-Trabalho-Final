@@ -30,6 +30,9 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS ix_packet_ts ON readings(packet_number, ts)"
         )
 
+def migrate_db():
+    pass
+
 def insert_reading(
     ts: int,
     packet_number: Optional[str],

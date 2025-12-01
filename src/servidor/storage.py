@@ -1,191 +1,92 @@
-"""
-Persistência SQLite com conexões separadas para LEITURA e ESCRITA.
-Evita 'database is locked' em cenários multi-thread.
-"""
-
-import sqlite3
 import os
-import threading
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 DB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "database"))
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "dados.db")
 
-# Conexões separadas
-_write_conn: Optional[sqlite3.Connection] = None
-_read_conn: Optional[sqlite3.Connection] = None
-
-# Mutex apenas para escrita
-_write_lock = threading.Lock()
-
-
-# -------- Funções internas --------
-
-def _make_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def _get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous = NORMAL;")
-    conn.execute("PRAGMA busy_timeout = 5000;")  # aguarda 5s antes de dar locked
     return conn
 
-
-def _get_write_conn() -> sqlite3.Connection:
-    global _write_conn
-    if _write_conn is None:
-        _write_conn = _make_conn()
-    return _write_conn
-
-
-def _get_read_conn() -> sqlite3.Connection:
-    global _read_conn
-    if _read_conn is None:
-        _read_conn = _make_conn()
-    return _read_conn
-
-
-# -------- Inicialização --------
-
 def init_db():
-    conn = _get_write_conn()
-    with conn:
-        conn.execute("""
+    with _get_conn() as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS readings (
                 ts   INTEGER NOT NULL,
                 packet_number TEXT,
-                node_id TEXT,            -- <=== AGORA SEM NOT NULL
+                node_id TEXT NOT NULL DEFAULT 'node_padrao',
                 temp REAL,
                 rh   REAL
             )
-        """)
-
-
-def migrate_db():
-    """
-    Garante consistência mesmo em DBs antigos:
-    - adiciona column node_id NULLABLE se não existir
-    - adiciona packet_number se necessário
-    - cria índice packet_number+ts
-    """
-    conn = _get_write_conn()
-    cur = conn.cursor()
-
-    cur.execute("PRAGMA table_info(readings)")
-    cols = [row[1] for row in cur.fetchall()]
-
-    # Adiciona packet_number se necessário (NULLABLE)
-    if "packet_number" not in cols:
-        cur.execute("ALTER TABLE readings ADD COLUMN packet_number TEXT")
-
-    # Adiciona node_id se necessário (NULLABLE)
-    if "node_id" not in cols:
-        cur.execute("ALTER TABLE readings ADD COLUMN node_id TEXT")
-
-    # Índice
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_packet_number_ts
-        ON readings(packet_number, ts)
-    """)
-
-    conn.commit()
-
-
-# -------- ESCRITA --------
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_packet_ts ON readings(packet_number, ts)"
+        )
 
 def insert_reading(
     ts: int,
     packet_number: Optional[str],
-    node_id: Optional[str] = None,
+    node_id: Optional[str] = "node_padrao",
     temp: Any = None,
-    rh: Any = None
+    rh: Any = None,
 ):
-    conn = _get_write_conn()
-    with _write_lock:
+    if node_id is None:
+        node_id = "node_padrao"
+
+    with _get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO readings (ts, packet_number, node_id, temp, rh)
+            INSERT OR REPLACE INTO readings (ts, packet_number, node_id, temp, rh)
             VALUES (?, ?, ?, ?, ?)
             """,
             (ts, packet_number, node_id, temp, rh),
         )
-        conn.commit()
-
 
 def delete_all():
-    conn = _get_write_conn()
-    with _write_lock:
+    with _get_conn() as conn:
         conn.execute("DELETE FROM readings")
-        conn.commit()
-
-
-# -------- LEITURA --------
 
 def get_last_readings(limit: int = 50, packet_number: Optional[str] = None) -> List[Dict[str, Any]]:
-    conn = _get_read_conn()
-    cur = conn.cursor()
-    if packet_number:
-        cur.execute(
-            """
-            SELECT ts, packet_number, node_id, temp, rh
-            FROM readings
-            WHERE packet_number = ?
-            ORDER BY ts DESC
-            LIMIT ?
-        """,
-            (packet_number, limit),
-        )
-    else:
-        cur.execute(
-            """
-            SELECT ts, packet_number, node_id, temp, rh
-            FROM readings
-            ORDER BY ts DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
-    return [dict(r) for r in cur.fetchall()]
-
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        if packet_number:
+            cur.execute(
+                "SELECT * FROM readings WHERE packet_number = ? ORDER BY ts DESC LIMIT ?",
+                (packet_number, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM readings ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            )
+        return [dict(r) for r in cur.fetchall()]
 
 def get_latest_by_packet() -> Dict[str, Dict[str, Any]]:
-    conn = _get_read_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT r.*
-        FROM readings r
-        JOIN (
-            SELECT packet_number, MAX(ts) AS max_ts
-            FROM readings
-            GROUP BY packet_number
-        ) x
-          ON r.packet_number = x.packet_number AND r.ts = x.max_ts
-        ORDER BY r.packet_number
-    """
-    )
-    return {row["packet_number"]: dict(row) for row in cur.fetchall()}
-
-
-def get_last_readings_for_packet(packet_number: str, limit: int = 20):
-    conn = _get_read_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT ts, temp, rh
-        FROM readings
-        WHERE packet_number = ?
-        ORDER BY ts DESC
-        LIMIT ?
-        """,
-        (packet_number, limit),
-    )
-    rows = cur.fetchall()
-    return [dict(r) for r in rows][::-1]
-
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT r.*
+            FROM readings r
+            JOIN (
+                SELECT packet_number, MAX(ts) AS max_ts
+                FROM readings
+                GROUP BY packet_number
+            ) x
+            ON r.packet_number = x.packet_number AND r.ts = x.max_ts
+            """
+        )
+        return {row["packet_number"]: dict(row) for row in cur.fetchall()}
 
 def count_rows() -> int:
-    conn = _get_read_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS n FROM readings")
-    return int(cur.fetchone()[0])
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM readings")
+        return int(cur.fetchone()[0])

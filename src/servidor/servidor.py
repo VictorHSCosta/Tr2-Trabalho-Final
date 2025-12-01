@@ -78,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
 
             # Dados para o dashboard
             last_by_packet = storage.get_latest_by_packet()
+            last_packet = last_by_packet[max(last_by_packet.keys()) if last_by_packet else None] # pega o último pacote recebido
             recent = storage.get_last_readings(limit=50)
 
             stats = {
@@ -86,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
                 "total_rows": storage.count_rows(),
                 "updated_at": time.time(),
             }
-            html = dashboard.render_html(last_packet=last_by_packet, recent=recent, stats=stats)
+            html = dashboard.render_html(last_packet=last_packet, recent=recent, stats=stats)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
             return
 

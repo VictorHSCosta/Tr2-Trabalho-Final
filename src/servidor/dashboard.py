@@ -142,29 +142,28 @@ def render_html(
     if not last_packet:
         cards.append("<div class='card empty'><em>Sem dados ainda.</em></div>")
     else:
-        for packet_number, row in last_packet.items():
-            ts = _fmt_ts(row.get("ts"))
-            temp = escape(str(row.get("temp", "—")))
-            rh = escape(str(row.get("rh", "—")))
-            card = f"""
-            <div class="card">
-              <div class="card-head">
-                <h3 class="room">N° Pacote {escape(str(packet_number))}</h3>
-                <div class="small muted">{ts}</div>
-              </div>
-              <div class="card-body">
-                <div class="stat">
-                  <div class="label">🌡️ Temperatura</div>
-                  <div class="value">{temp} °C</div>
-                </div>
-                <div class="stat">
-                  <div class="label">💧 UR</div>
-                  <div class="value">{rh} %</div>
-                </div>
-              </div>
+        ts = _fmt_ts(last_packet.get("ts"))
+        temp = escape(str(last_packet.get("temp", "—")))
+        rh = escape(str(last_packet.get("rh", "—")))
+        card = f"""
+        <div class="card">
+          <div class="card-head">
+            <h3 class="room">N° Pacote {escape(str(last_packet.get("packet_number")))}</h3>
+            <div class="small muted">{ts}</div>
+          </div>
+          <div class="card-body">
+            <div class="stat">
+              <div class="label">🌡️ Temperatura</div>
+              <div class="value">{temp} °C</div>
             </div>
-            """
-            cards.append(card)
+            <div class="stat">
+              <div class="label">💧 UR</div>
+              <div class="value">{rh} %</div>
+            </div>
+          </div>
+        </div>
+        """
+        cards.append(card)
 
     # Tabela de últimas leituras
     rows_html = []

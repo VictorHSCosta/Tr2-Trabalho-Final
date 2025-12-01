@@ -54,6 +54,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS readings (
                 ts   INTEGER NOT NULL,
                 packet_number TEXT,
+                node_id TEXT,            -- <=== AGORA SEM NOT NULL
                 temp REAL,
                 rh   REAL
             )
@@ -61,15 +62,27 @@ def init_db():
 
 
 def migrate_db():
+    """
+    Garante consistência mesmo em DBs antigos:
+    - adiciona column node_id NULLABLE se não existir
+    - adiciona packet_number se necessário
+    - cria índice packet_number+ts
+    """
     conn = _get_write_conn()
     cur = conn.cursor()
 
     cur.execute("PRAGMA table_info(readings)")
     cols = [row[1] for row in cur.fetchall()]
 
+    # Adiciona packet_number se necessário (NULLABLE)
     if "packet_number" not in cols:
         cur.execute("ALTER TABLE readings ADD COLUMN packet_number TEXT")
 
+    # Adiciona node_id se necessário (NULLABLE)
+    if "node_id" not in cols:
+        cur.execute("ALTER TABLE readings ADD COLUMN node_id TEXT")
+
+    # Índice
     cur.execute("""
         CREATE INDEX IF NOT EXISTS ix_packet_number_ts
         ON readings(packet_number, ts)
@@ -80,15 +93,21 @@ def migrate_db():
 
 # -------- ESCRITA --------
 
-def insert_reading(ts: int, packet_number: str, temp: Any = None, rh: Any = None):
+def insert_reading(
+    ts: int,
+    packet_number: Optional[str],
+    node_id: Optional[str] = None,
+    temp: Any = None,
+    rh: Any = None
+):
     conn = _get_write_conn()
     with _write_lock:
         conn.execute(
             """
-            INSERT OR REPLACE INTO readings (ts, packet_number, temp, rh)
-            VALUES (?, ?, ?, ?)
-        """,
-            (ts, packet_number, temp, rh),
+            INSERT INTO readings (ts, packet_number, node_id, temp, rh)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ts, packet_number, node_id, temp, rh),
         )
         conn.commit()
 
@@ -108,7 +127,7 @@ def get_last_readings(limit: int = 50, packet_number: Optional[str] = None) -> L
     if packet_number:
         cur.execute(
             """
-            SELECT ts, packet_number, temp, rh
+            SELECT ts, packet_number, node_id, temp, rh
             FROM readings
             WHERE packet_number = ?
             ORDER BY ts DESC
@@ -119,7 +138,7 @@ def get_last_readings(limit: int = 50, packet_number: Optional[str] = None) -> L
     else:
         cur.execute(
             """
-            SELECT ts, packet_number, temp, rh
+            SELECT ts, packet_number, node_id, temp, rh
             FROM readings
             ORDER BY ts DESC
             LIMIT ?

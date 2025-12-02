@@ -78,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
 
             # Dados para o dashboard
             last_by_packet = storage.get_latest_by_packet()
-            last_packet = last_by_packet[max(last_by_packet.keys()) if last_by_packet else None] # pega o último pacote recebido
+            last_packet = last_by_packet[str(max([int(i) for i in last_by_packet.keys()])) if last_by_packet else None] # pega o último pacote recebido
             recent = storage.get_last_readings(limit=50)
 
             stats = {
